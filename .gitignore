@@ -1,0 +1,13 @@
+# ESPHome 构建产物
+.esphome/
+*.bin
+*.elf
+*.map
+*.pioenvs/
+
+# 真实凭据
+secrets.yaml
+
+# 系统文件
+.DS_Store
+Thumbs.db

@@ -308,6 +308,28 @@ esp32-fan-controller/
 
 ---
 
+## 与 App 项目的关系
+
+| | 本项目（固件） | [smartfan-android](https://github.com/hongluoluo/smartfan-android)（App） |
+|---|---|---|
+| 运行位置 | ESP32-WROOM-32E | 安卓手机 |
+| 职责 | **真正干活**：输出 PWM、执行星期定时与倒计时、维护状态 | **只做配置与展示**：开关、调速、规则编辑、剩余时间显示 |
+| 依赖关系 | 不依赖 App（也可以只用 Home Assistant 控制） | 依赖固件提供的 MQTT 主题协议 |
+| 通信路径 | `设备 ⇄ MQTT broker`；另有一条 HA 原生 API 通道 | `App ⇄ MQTT broker` |
+
+关键点：**定时和倒计时的执行完全在设备里**。App 只是把规则写进设备的 6 个槽位、把倒计时参数下发给设备；手机没电、关机、App 被卸载，到点照样执行。反过来，设备换了 App 也能用——只要遵循下面的协议契约。
+
+协议契约（两端必须一致，改动需同步两个仓库）：
+
+| 用途 | 主题 | 载荷 |
+|---|---|---|
+| 命令 | `fan32/text/cmd/command` | `on` / `off` / `speed N` |
+| 状态快照 | `fan32/state`（retained） | `{"on":..,"speed":..,"rules":[..6..],"cd_action":..,"cd_rem":..}` |
+| 定时槽 | `fan32/text/ruleN/command` | `HH:MM\|DAYS\|ACTION\|SPEED` |
+| 倒计时 | `fan32/text/cd_action/command`、`fan32/number/cd_minutes/command`、`fan32/button/cd_start(或 cd_cancel)/command` | `ON/OFF`、`1~1440`、`PRESS` |
+
+---
+
 ## 许可证
 
 MIT，见 [LICENSE](LICENSE)。

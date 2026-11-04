@@ -263,6 +263,29 @@ HH:MM|DAYS|ACTION|SPEED
 
 ---
 
+## 可靠性设计（HA "看不到状态" 的三道防线）
+
+| 措施 | 解决什么 |
+|---|---|
+| `wifi.manual_ip` 静态 IP | DHCP 换址后 HA 的 ESPHome 集成仍指向旧 IP → 永久失联；固定后地址不再漂移 |
+| `api.reboot_timeout: 0s` | 默认 15 分钟内无 API 客户端接入就重启，HA 连不上时会触发反复重启、每次可能换 IP |
+| `wifi.power_save_mode: none` | 关闭 WiFi 省电，避免长连接被挂起导致 API/MQTT "假死"（设备在跑、TCP 不响应） |
+| `wifi.fast_connect: true` | 开机直连已存 SSID，跳过扫描，缩短断线恢复时间 |
+| `interval: 5s` retained 快照 | 客户端重连后 5 秒内拿到全量真实状态 |
+| `text_sensor.debug.reset_reason` | 可判断设备是被断电（power_on）、电压跌落（brownout）还是程序重启（software） |
+
+诊断实体（HA 与 MQTT 都可见）：
+
+| 名称 | MQTT 主题 | 用途 |
+|---|---|---|
+| `wifi_ip` | `fan32/sensor/wifi_ip/state` | 设备当前 IP，确认是否漂移 |
+| `reset_reason` | `fan32/sensor/reset_reason/state` | 复位原因 |
+| `dev_time` | `fan32/sensor/dev_time/state` | 设备时间，判断是否完成 NTP 授时 |
+
+> 注意：ESPHome 的 `text_sensor` 在 MQTT 上落在 `<prefix>/sensor/<name>/state`，不是 `text_sensor/`。写客户端时按实体名匹配最稳妥。
+
+---
+
 ## 常见问题与踩过的坑
 
 **1. 空载测输出电压永远接近 12V**

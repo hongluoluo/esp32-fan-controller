@@ -1,9 +1,11 @@
 # ============================================================================
 #  ESP32 风扇调压控制器 (ESP32-WROOM-32E + ESPHome)
-#  - PWM: GPIO17, LEDC 18kHz, 占空比 40%~80% 映射到 1%~100% 风速
-#  - 控制: Home Assistant (原生 API) + MQTT (供安卓 App 直连)
-#  - 定时: 6 个星期规则槽 + 设备端倒计时，全部掉电保存、不依赖手机
-#  凭据全部通过 secrets.yaml 注入，见 secrets.yaml.example
+#  - PWM: GPIO17, LEDC 18kHz；占空比 40%~80% 映射到 1%~100% 风速
+#  - 控制: Home Assistant 原生 API（加密） + MQTT（供 App/第三方直连）
+#  - 定时: 6 个星期规则槽 + 设备端倒计时，掉电保存，不依赖手机
+#  - 可靠性: 静态 IP、关闭 api reboot_timeout、关闭 WiFi 省电、fast_connect
+#  - 诊断: wifi_ip / reset_reason / dev_time / 5 秒 retained 状态快照
+#  凭据与网络参数全部通过 secrets.yaml 注入，见 secrets.yaml.example
 # ============================================================================
 esphome:
   name: psu-fan-32
@@ -24,7 +26,13 @@ esp32:
 
 logger:
 
+# 提供复位原因等诊断信息（配合 text_sensor.debug 使用）
+debug:
+  update_interval: 60s
+
 api:
+  # 关闭"无客户端接入则重启"的默认值(15min)：否则 HA 一旦连不上，设备会反复重启换 IP
+  reboot_timeout: 0s
   encryption:
     key: !secret fan_api_key
 
@@ -44,6 +52,15 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  # 固定 IP：避免 DHCP 换址后 HA 的 ESPHome 集成指向旧地址（本网 mDNS 不生效，无法自动纠正）
+  manual_ip:
+    static_ip: !secret device_ip
+    gateway: !secret gateway_ip
+    subnet: 255.255.255.0
+    dns1: 223.5.5.5
+    dns2: 114.114.114.114
+  fast_connect: true        # 开机直连已存 SSID，跳过扫描，缩短断线恢复时间
+  power_save_mode: none     # 关闭 WiFi 省电，避免 TCP 长连接被挂起导致 API/MQTT "假死"
   # WiFi 连不上时自动开热点，手机连上即可重新配网
   ap:
     ssid: "psu-fan-32-fallback"
@@ -258,6 +275,20 @@ button:
           ESP_LOGI("cd", "cancelled");
 
 text_sensor:
+  # 设备当前 IP（HA/App 都能看到，排障关键：IP 漂移是 HA 掉线的头号原因）
+  - platform: wifi_info
+    ip_address:
+      id: wifi_ip
+      name: "wifi_ip"
+      icon: "mdi:ip-network"
+    ssid:
+      name: "wifi_ssid"
+  # 复位原因：brownout=电源跌落 / power_on=断电重上 / software=程序重启
+  - platform: debug
+    reset_reason:
+      id: reset_reason
+      name: "reset_reason"
+      icon: "mdi:restart-alert"
   - platform: template
     id: dev_time
     name: "dev_time"
@@ -288,7 +319,7 @@ sensor:
 
 interval:
   # 每 20 秒刷新 retained 状态快照（含规则与倒计时），保证 App 冷启动可读到全量状态
-  - interval: 20s
+  - interval: 5s
     then:
       - mqtt.publish:
           topic: fan32/state
@@ -297,11 +328,12 @@ interval:
           payload: !lambda |-
             char buf[320];
             snprintf(buf, sizeof(buf),
-              "{\"on\":%s,\"speed\":%d,\"rules\":[\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\"],\"cd_action\":\"%s\",\"cd_rem\":%d}",
+              "{\"on\":%s,\"speed\":%d,\"rules\":[\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\"],\"cd_action\":\"%s\",\"cd_rem\":%d,\"ip\":\"%s\",\"up\":%d}",
               id(fan1).state ? "true" : "false", id(fan1).speed,
               id(rule1).state.c_str(), id(rule2).state.c_str(), id(rule3).state.c_str(),
               id(rule4).state.c_str(), id(rule5).state.c_str(), id(rule6).state.c_str(),
-              id(cd_action).state.c_str(), (int) id(cd_remaining).state);
+              id(cd_action).state.c_str(), (int) id(cd_remaining).state,
+              id(wifi_ip).state.c_str(), (int) (millis() / 1000));
             return std::string(buf);
   - interval: 3s
     then:
@@ -374,9 +406,10 @@ fan:
           payload: !lambda |-
             char buf[320];
             snprintf(buf, sizeof(buf),
-              "{\"on\":%s,\"speed\":%d,\"rules\":[\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\"],\"cd_action\":\"%s\",\"cd_rem\":%d}",
+              "{\"on\":%s,\"speed\":%d,\"rules\":[\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\"],\"cd_action\":\"%s\",\"cd_rem\":%d,\"ip\":\"%s\",\"up\":%d}",
               id(fan1).state ? "true" : "false", id(fan1).speed,
               id(rule1).state.c_str(), id(rule2).state.c_str(), id(rule3).state.c_str(),
               id(rule4).state.c_str(), id(rule5).state.c_str(), id(rule6).state.c_str(),
-              id(cd_action).state.c_str(), (int) id(cd_remaining).state);
+              id(cd_action).state.c_str(), (int) id(cd_remaining).state,
+              id(wifi_ip).state.c_str(), (int) (millis() / 1000));
             return std::string(buf);
